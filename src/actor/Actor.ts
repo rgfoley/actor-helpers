@@ -12,7 +12,10 @@
  * http://polymer.github.io/PATENTS.txt
  */
 
-import { WatchableMessageStore } from "../watchable-message-store/WatchableMessageStore.js";
+import {
+  StoredMessage,
+  WatchableMessageStore
+} from "../watchable-message-store/WatchableMessageStore.js";
 
 declare global {
   /**
@@ -41,6 +44,13 @@ declare global {
  * All actor names that are defined in {@link ActorMessageType}.
  */
 export type ValidActorMessageName = keyof ActorMessageType;
+
+export type ActorCreator<T> = () => Actor<T>;
+
+export interface ActorConfiguration<ActorName extends ValidActorMessageName> {
+  name: ActorName;
+  dependencies?: ActorName[];
+}
 
 /**
  * A base-class to define an Actor type. It requires all sub-classes to
@@ -143,11 +153,185 @@ export abstract class Actor<T> {
   abstract onMessage(message: T): void;
 }
 
+/**
+ * @return A random positive integer
+ */
+function randomMaxInt() {
+  return Math.floor(Math.random() * Number.MAX_SAFE_INTEGER);
+}
+
 const messageStore = new WatchableMessageStore("ACTOR-MESSAGES");
+
+type MetaUid = string;
+enum MetaMessageType {
+  INIT,
+  REPLY,
+  HOOKUP,
+  HOOKDOWN
+}
+
+/**
+ * A message fired by {@link initMeta} to signal that a browsing context
+ * has begun listening to the meta BroadcastChannel.
+ */
+interface MetaInitMessage {
+  type: MetaMessageType.INIT;
+  payload: { sender: MetaUid };
+}
+
+/**
+ * A message fired by {@link initMeta} in response to a {@link MetaInitMessage}
+ * containing the set of readyActors for the current browsing context.
+ */
+interface MetaAnnounceMessage {
+  type: MetaMessageType.REPLY;
+  payload: { sender: MetaUid; readyActors: Set<ValidActorMessageName> };
+}
+
+/**
+ * A message fired by {@link hookup} to signal that an actor
+ * has been created, initialized, and added to the set of readyActors
+ * in the current browsing context.
+ */
+interface MetaHookupMessage {
+  type: MetaMessageType.HOOKUP;
+  payload: { sender: MetaUid; actor: ValidActorMessageName };
+}
+
+/**
+ * A message fired by {@link HookdownCallback} to signal that an actor has
+ * been de-initialized.
+ */
+interface MetaHookdownMessage {
+  type: MetaMessageType.HOOKDOWN;
+  payload: { sender: MetaUid; actor: ValidActorMessageName };
+}
+
+type MetaMessage =
+  | MetaInitMessage
+  | MetaHookupMessage
+  | MetaHookdownMessage
+  | MetaAnnounceMessage;
+/**
+ * Callback fired when an actor is ready
+ */
+type ReadyCallback = () => void;
+
+const metaUid = `${randomMaxInt()}-${randomMaxInt()}`;
+const META_CHANNEL_NAME = "ACTOR_META_CHANNEL_NAME";
+
+const metaChannel = new BroadcastChannel(META_CHANNEL_NAME);
+const readyActors = new Set<ValidActorMessageName>();
+const readyCallbacks = new Map<ValidActorMessageName, Set<ReadyCallback>>();
+
+/**
+ * Adds the given actorName to the set of readyActors. If there are any readyCallbacks
+ * attached to that actorName, it will sequentially fire them (regardless of whether any errors are thrown).
+ * @param actorName
+ */
+function addReadyActor<ActorName extends ValidActorMessageName>(
+  actorName: ActorName
+) {
+  readyActors.add(actorName);
+  const callbacks = readyCallbacks.get(actorName);
+
+  if (callbacks) {
+    callbacks.forEach(cb => {
+      try {
+        cb();
+      } catch (e) {
+        console.error(e);
+      }
+    });
+    readyCallbacks.set(actorName, new Set<ReadyCallback>());
+  }
+}
+
+/**
+ * Removes the provided {@link ReadyCallback} from the set of listeners attached to
+ * the given actorName.
+ * @param actorName
+ * @param callback
+ */
+function offActorReady<ActorName extends ValidActorMessageName>(
+  actorName: ActorName,
+  callback: ReadyCallback
+) {
+  const callbacks = readyCallbacks.get(actorName);
+  if (callbacks) {
+    callbacks.delete(callback);
+  }
+}
+
+/**
+ * Adds the provided {@link ReadyCallback} as a listener that will be fired when
+ * actorName is announced as ready.
+ * @param actorName
+ * @param callback
+ */
+function onActorReady<ActorName extends ValidActorMessageName>(
+  actorName: ActorName,
+  callback: ReadyCallback
+) {
+  if (readyActors.has(actorName)) {
+    callback();
+    return;
+  }
+
+  if (!readyCallbacks.has(actorName)) {
+    readyCallbacks.set(actorName, new Set<ReadyCallback>());
+  }
+
+  const callbacks = readyCallbacks.get(actorName) as Set<ReadyCallback>;
+  callbacks.add(callback);
+}
+
+/**
+ * Attaches a listener to the metaChannel to keep track of Actor
+ * initialization across browsing contexts.
+ */
+function initMeta() {
+  metaChannel.addEventListener("message", (evt: MessageEvent) => {
+    const message = evt.data as MetaMessage;
+
+    switch (message.type) {
+      case MetaMessageType.INIT: // A request to get the latest set of actors
+        metaChannel.postMessage({
+          type: MetaMessageType.REPLY,
+          payload: { sender: metaUid, readyActors }
+        } as MetaAnnounceMessage);
+        return;
+
+      case MetaMessageType.REPLY: // Add any previously-unknown actors
+        message.payload.readyActors.forEach(addReadyActor);
+        return;
+
+      case MetaMessageType.HOOKUP: // Add the new actor
+        addReadyActor(message.payload.actor);
+        return;
+
+      case MetaMessageType.HOOKDOWN: // Delete the destroyed actor
+        if (readyActors.has(message.payload.actor)) {
+          readyActors.delete(message.payload.actor);
+        }
+        return;
+    }
+
+    const _never: never = message; // Trigger exhaustiveness check on message type
+    return _never;
+  });
+
+  metaChannel.postMessage({
+    type: MetaMessageType.INIT,
+    payload: { sender: metaUid }
+  } as MetaInitMessage);
+}
+
+initMeta();
 
 /**
  * The callback-type which is returned by {@link hookup} that can be used
- * to remove an {@link Actor} from the system.
+ * to remove an {@link Actor} from the system. Fires the MetaHookdownMessage.
  */
 export type HookdownCallback = () => Promise<void>;
 
@@ -170,18 +354,35 @@ export type HookdownCallback = () => Promise<void>;
  *
  * If you would like to send a message to the "ui" actor, use {@link lookup}.
  *
- * @param actorName The name this actor will listen to.
- * @param actor The actor implementation that can process messages.
+ * @param config An {@link ActorConfiguration} that specifies actor name and optional dependencies.
+ * @param actorCreator An {@link ActorCreator} function that returns an Actor instance.
  * @param purgeExistingMessages Whether any messages that arrived before this
  *    actor was ready should be discarded.
  * @return A promise which, once resolved, provides a callback that can be
  *    invoked to remove this actor from the system.
  */
 export async function hookup<ActorName extends ValidActorMessageName>(
-  actorName: ActorName,
-  actor: Actor<ActorMessageType[ActorName]>,
+  config: ActorConfiguration<ActorName>,
+  actorCreator: ActorCreator<ActorMessageType[ActorName]>,
   { purgeExistingMessages = false }: { purgeExistingMessages?: boolean } = {}
 ): Promise<HookdownCallback> {
+  const { name: actorName } = config;
+
+  if (config.dependencies && config.dependencies.length) {
+    await Promise.all(config.dependencies.map(waitFor));
+  }
+
+  Promise.resolve().then(() => {
+    addReadyActor(actorName);
+
+    metaChannel.postMessage({
+      type: MetaMessageType.HOOKUP,
+      payload: { sender: metaUid, actor: actorName }
+    } as MetaHookupMessage);
+  }); // run in separate microtask
+
+  const actor = actorCreator();
+
   actor.actorName = actorName;
   // @ts-ignore
   await actor.initPromise;
@@ -203,7 +404,48 @@ export async function hookup<ActorName extends ValidActorMessageName>(
   return async () => {
     hookdown();
     await messageStore.popMessages(actorName);
+    readyActors.delete(actorName);
+    metaChannel.postMessage({
+      type: MetaMessageType.HOOKDOWN,
+      payload: { sender: metaUid, actor: actorName }
+    } as MetaHookdownMessage);
   };
+}
+
+/**
+ * @param t How long to wait until resolving (milliseconds)
+ * @return A Promise that resolves after the given number of milliseconds
+ */
+function sleep(t = 1000) {
+  return new Promise(resolve => setTimeout(resolve, t));
+}
+
+/**
+ * Used to await any actors that need to be loaded.
+ * @param actorName The name of the actor to wait for
+ * @return A Promise that resolves if the actor is loaded,
+ *         and otherwise rejects if the timeout is exceeded.
+ */
+async function waitFor<ActorName extends ValidActorMessageName>(
+  actorName: ActorName
+): Promise<void> {
+  await new Promise(async (resolve, reject) => {
+    let ready = false;
+    const callback = () => {
+      ready = true;
+      resolve();
+    };
+
+    onActorReady(actorName, callback);
+
+    await sleep(5000);
+
+    offActorReady(actorName, callback);
+
+    if (!ready) {
+      reject(new Error(`Timed out waiting for actor "${actorName}".`));
+    }
+  });
 }
 
 /**
