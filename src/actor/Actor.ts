@@ -12,10 +12,7 @@
  * http://polymer.github.io/PATENTS.txt
  */
 
-import {
-  StoredMessage,
-  WatchableMessageStore
-} from "../watchable-message-store/WatchableMessageStore.js";
+import { WatchableMessageStore } from "../watchable-message-store/WatchableMessageStore.js";
 
 declare global {
   /**
