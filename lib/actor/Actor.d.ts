@@ -38,6 +38,11 @@ declare global {
  * All actor names that are defined in {@link ActorMessageType}.
  */
 export declare type ValidActorMessageName = keyof ActorMessageType;
+export declare type ActorCreator<T> = () => Actor<T>;
+export interface ActorConfiguration<ActorName extends ValidActorMessageName> {
+    name: ActorName;
+    dependencies?: ActorName[];
+}
 /**
  * A base-class to define an Actor type. It requires all sub-classes to
  * implement the {@link Actor#onMessage} callback.
@@ -133,7 +138,7 @@ export declare abstract class Actor<T> {
 }
 /**
  * The callback-type which is returned by {@link hookup} that can be used
- * to remove an {@link Actor} from the system.
+ * to remove an {@link Actor} from the system. Fires the MetaHookdownMessage.
  */
 export declare type HookdownCallback = () => Promise<void>;
 /**
@@ -155,14 +160,14 @@ export declare type HookdownCallback = () => Promise<void>;
  *
  * If you would like to send a message to the "ui" actor, use {@link lookup}.
  *
- * @param actorName The name this actor will listen to.
- * @param actor The actor implementation that can process messages.
+ * @param config An {@link ActorConfiguration} that specifies actor name and optional dependencies.
+ * @param actorCreator An {@link ActorCreator} function that returns an Actor instance.
  * @param purgeExistingMessages Whether any messages that arrived before this
  *    actor was ready should be discarded.
  * @return A promise which, once resolved, provides a callback that can be
  *    invoked to remove this actor from the system.
  */
-export declare function hookup<ActorName extends ValidActorMessageName>(actorName: ActorName, actor: Actor<ActorMessageType[ActorName]>, { purgeExistingMessages }?: {
+export declare function hookup<ActorName extends ValidActorMessageName>(config: ActorConfiguration<ActorName>, actorCreator: ActorCreator<ActorMessageType[ActorName]>, { purgeExistingMessages }?: {
     purgeExistingMessages?: boolean;
 }): Promise<HookdownCallback>;
 /**
