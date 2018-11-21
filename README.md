@@ -4,6 +4,11 @@ Helpers to build web applications based on the [actor model].
 These helpers are used in our examples, for which you can find our boilerplate [here][boilerplate].
 We encourage you to read through the boilerplate examples first and then read through the code in this repository.
 
+## modifications
+
+Changed `actor.ts` functions/types to support dependencies between actors. Added a separate meta BroadcastChannel for coordinating actor readiness between browsing contexts/workers.
+The `hookup` signature has changed to receive an `ActorConfiguration` instead of an `actorName` string.
+
 ## actor.ts
 
 `actor.ts` contains a base class implementation for an actor, as well as functions to `hookup()` and `lookup()` actors on the web page.
