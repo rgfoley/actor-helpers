@@ -48,7 +48,7 @@ suite("Actor", () => {
         }
       }
 
-      hookdown = await hookup("ignoring1", new IgnoringActor());
+      hookdown = await hookup({ name: "ignoring1" }, () => new IgnoringActor());
       await lookup("ignoring1").send("foo");
     });
   });
@@ -61,7 +61,7 @@ suite("Actor", () => {
         }
       }
 
-      hookdown = await hookup("ignoring", new IgnoringActor());
+      hookdown = await hookup({ name: "ignoring" }, () => new IgnoringActor());
 
       await lookup("ignoring").send("dummy");
     });
@@ -78,7 +78,10 @@ suite("Actor", () => {
       await lookup("ignoring").send("dummy");
 
       setTimeout(async () => {
-        hookdown = await hookup("ignoring", new IgnoringActor());
+        hookdown = await hookup(
+          { name: "ignoring" },
+          () => new IgnoringActor()
+        );
       }, 100);
     });
   });
@@ -92,7 +95,7 @@ suite("Actor", () => {
         }
       }
 
-      hookdown = await hookup("ignoring", new IgnoringActor());
+      hookdown = await hookup({ name: "ignoring" }, () => new IgnoringActor());
 
       await lookup("ignoring").send("dummy");
     });
@@ -117,7 +120,7 @@ suite("Actor", () => {
 
         onMessage() {}
       }
-      hookdown = await hookup("ignoring", new IgnoringActor());
+      hookdown = await hookup({ name: "ignoring" }, () => new IgnoringActor());
     });
   });
 
@@ -131,7 +134,10 @@ suite("Actor", () => {
           }
         }
         await initializeQueues();
-        hookdown = await hookup("ignoring", new IgnoringActor());
+        hookdown = await hookup(
+          { name: "ignoring" },
+          () => new IgnoringActor()
+        );
         setTimeout(resolve, 100);
       });
     });
